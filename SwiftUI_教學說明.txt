@@ -1,0 +1,507 @@
+================================================================================
+SwiftUI 登入頁面教學說明文件
+Foodie's App - LoginView 實作說明
+================================================================================
+
+【檔案結構說明】
+-----------------
+1. LoginView.swift   - 登入頁面（使用 AuthManager.shared 控制登入狀態）
+2. RegisterView.swift - 註冊頁面（建立新帳號，成功後透過 AuthManager 自動登入）
+3. HomeView.swift    - 主頁面（顯示卡路里進度與餐點列表，可登出）
+4. AuthManager.swift - 全域認證管理（ObservableObject，管理 isLoggedIn 狀態）
+5. ContentView.swift - 根視圖，根據 AuthManager.isLoggedIn 在 LoginView / HomeView 之間切換
+
+================================================================================
+【SwiftUI 基礎概念對照表】
+================================================================================
+
+【視圖容器（類似 HTML 的 div）】
+---------------------------------
+VStack (Vertical Stack)
+  → 垂直排列元素，類似 HTML: <div style="display: flex; flex-direction: column">
+  → 範例: VStack { Text("上") Text("下") }
+  
+HStack (Horizontal Stack)
+  → 水平排列元素，類似 HTML: <div style="display: flex; flex-direction: row">
+  → 範例: HStack { Text("左") Text("右") }
+  
+ZStack (Z-axis Stack)
+  → 層疊視圖，類似 CSS: position: absolute 的層疊效果
+  → 常用於背景和前景的組合
+  → 範例: ZStack { Background() Content() }
+
+【狀態管理（類似 React 的 useState / Context）】
+----------------------------------------------
+@State
+  → 用於管理視圖內部的狀態變數
+  → 當 @State 變數改變時，SwiftUI 會自動重新渲染視圖
+  → 類似 React: const [email, setEmail] = useState("")
+  
+  → 範例:
+     @State private var email: String = ""
+     @State private var isPasswordVisible: Bool = false
+
+ObservableObject（在 AuthManager.swift 中使用）
+  → 用於建立「可被觀察的物件」，通常放 global / shared 狀態
+  → 搭配 @Published 使用，屬性改變時會通知使用這個物件的所有視圖
+  → AuthManager: class AuthManager: ObservableObject { ... }
+
+@Published
+  → 標記需要「觸發畫面更新」的屬性
+  → 例如：@Published var isLoggedIn: Bool = false
+  → 當 isLoggedIn 改變時，所有使用 AuthManager 的視圖都會自動重繪
+
+@ObservedObject
+  → 在「視圖」裡面觀察 ObservableObject
+  → 類似 React 用 Context + useContext 取得 store 之後，自動根據狀態重新 render
+  → 範例：
+     @ObservedObject var authManager = AuthManager.shared
+
+【雙向綁定（$ 符號）】
+---------------------
+$email
+  → 在 TextField 中使用 $email 可以實現雙向綁定
+  → 當用戶輸入時，email 變數會自動更新
+  → 類似 Vue.js 的 v-model 或 React 的 controlled input
+  
+  → 範例:
+     TextField("請輸入電子郵件", text: $email)
+     // 當用戶輸入時，email 變數會自動更新
+
+【常用修飾符（類似 CSS）】
+--------------------------
+.padding()
+  → 類似 CSS: padding
+  → .padding(15) = padding: 15px
+  → .padding(.horizontal, 30) = padding-left: 30px; padding-right: 30px
+  
+.background()
+  → 類似 CSS: background-color 或 background
+  → .background(Color.blue) = background-color: blue
+  
+.foregroundColor()
+  → 類似 CSS: color
+  → .foregroundColor(.white) = color: white
+  
+.font()
+  → 類似 CSS: font-size 和 font-weight
+  → .font(.system(size: 18, weight: .bold)) = font-size: 18px; font-weight: bold
+  
+.frame()
+  → 類似 CSS: width 和 height
+  → .frame(width: 200, height: 50) = width: 200px; height: 50px
+  → .frame(maxWidth: .infinity) = width: 100%
+  
+.cornerRadius() 或 RoundedRectangle
+  → 類似 CSS: border-radius
+  → RoundedRectangle(cornerRadius: 12) = border-radius: 12px
+
+【常用元件（類似 HTML 標籤）】
+------------------------------
+Text
+  → 類似 HTML: <p> 或 <span>
+  → 範例: Text("Hello World")
+  
+TextField
+  → 類似 HTML: <input type="text">
+  → 用於單行文字輸入
+  → 範例: TextField("提示文字", text: $email)
+  
+SecureField
+  → 類似 HTML: <input type="password">
+  → 用於密碼輸入（自動隱藏）
+  → 範例: SecureField("請輸入密碼", text: $password)
+  
+Button
+  → 類似 HTML: <button>
+  → 範例: Button("按鈕文字") { /* 點擊時執行的程式碼 */ }
+  
+Image
+  → 類似 HTML: <img>
+  → Image(systemName: "eye.fill") 使用 SF Symbols 圖標庫
+  → Image("圖片名稱") 使用專案中的圖片資源
+
+【Spacer（類似 CSS 的 flex: 1）】
+---------------------------------
+Spacer()
+  → 自動填充可用空間，用來推開元素
+  → 類似 CSS: flex: 1
+  → 常用於 VStack 或 HStack 中分配空間
+
+================================================================================
+【LoginView.swift（登入頁面）詳細說明】
+================================================================================
+
+【1. 狀態變數宣告】
+------------------
+@State private var email: String = ""
+  → 儲存用戶輸入的電子郵件
+  → @State 讓這個變數可以觸發視圖更新
+  
+@State private var password: String = ""
+  → 儲存用戶輸入的密碼
+  
+@State private var isPasswordVisible: Bool = false
+  → 控制密碼是否顯示（true = 顯示，false = 隱藏）
+
+@State private var showingRegister = false
+  → 控制是否顯示註冊頁面的 sheet（modal 視窗）
+
+@ObservedObject var authManager = AuthManager.shared
+  → 使用「單例」的 AuthManager，整個 app 共用同一份登入狀態
+  → 重要：當 authManager.isLoggedIn 被設為 true / false 時，
+          觀察它的 ContentView / HomeView / LoginView 會自動重新渲染
+
+【2. 視圖結構】
+--------------
+ZStack {
+  → 最外層容器，用於層疊背景和內容
+  
+  LinearGradient(...)
+    → 漸層背景（藍色到紫色）
+    → .ignoresSafeArea() 讓背景延伸到安全區域外
+  
+  VStack(spacing: 30) {
+    → 主要內容容器，垂直排列
+    → spacing: 30 表示子元素之間的間距為 30
+    
+    // Logo 區域
+    VStack(spacing: 15) {
+      Image(systemName: "fork.knife.circle.fill")
+        → SF Symbols 圖標（刀叉圖標）
+        → .font(.system(size: 80)) 設定大小
+      
+      Text("Foodie's")
+        → 應用程式標題
+      
+      Text("追蹤你的每一餐")
+        → 副標題
+    }
+    
+    Spacer()
+      → 推開 Logo 和表單之間的空間
+    
+    // 表單區域
+    VStack(spacing: 20) {
+      → 表單容器，包含所有輸入框和按鈕
+      
+      // 電子郵件輸入框
+      VStack(alignment: .leading, spacing: 8) {
+        → alignment: .leading 讓文字靠左對齊
+        → spacing: 8 設定標題和輸入框之間的間距
+        
+        Text("電子郵件")
+          → 標籤文字
+        
+        TextField("請輸入電子郵件", text: $email)
+          → $email 實現雙向綁定
+          → .textFieldStyle(CustomTextFieldStyle()) 使用自訂樣式
+          → .autocapitalization(.none) 不自動大寫
+          → .keyboardType(.emailAddress) 顯示電子郵件鍵盤
+      }
+      
+      // 密碼輸入框（含顯示/隱藏功能）
+      HStack {
+        → 水平排列輸入框和眼睛圖標按鈕
+        
+        if isPasswordVisible {
+          → SwiftUI 的條件渲染（類似 React 的 {condition && <Component />}）
+          TextField("請輸入密碼", text: $password)
+        } else {
+          SecureField("請輸入密碼", text: $password)
+        }
+        
+        Button(action: {
+          isPasswordVisible.toggle()
+            → toggle() 在 true 和 false 之間切換
+        }) {
+          Image(systemName: isPasswordVisible ? "eye.slash.fill" : "eye.fill")
+            → 三元運算子：如果 isPasswordVisible 為 true 顯示閉眼圖標，否則顯示睜眼圖標
+        }
+      }
+      
+      // 登入按鈕
+      Button(action: {
+        handleLogin()
+      }) {
+        Text("登入")
+          .frame(maxWidth: .infinity)  // 寬度填滿父容器
+          .frame(height: 50)           // 高度 50
+          .background(...)             // 半透明白色背景
+      }
+    }
+  }
+}
+
+【3. 自訂樣式（CustomTextFieldStyle）】
+----------------------------------------
+struct CustomTextFieldStyle: TextFieldStyle {
+  → 類似 CSS 的 class，定義可重複使用的樣式
+  
+  func _body(configuration: TextField<Self._Label>) -> some View {
+    configuration
+      .padding(15)                    // 內邊距
+      .background(
+        RoundedRectangle(cornerRadius: 12)
+          .fill(Color.white.opacity(0.2))  // 半透明白色背景
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 12)
+          .stroke(Color.white.opacity(0.3), lineWidth: 1)  // 邊框
+      )
+  }
+}
+  → 這個樣式讓所有使用它的 TextField 都有統一的視覺效果
+
+【4. 函數說明：handleLogin() 與自動跳到主畫面】
+---------------------------------------------
+handleLogin()
+  → 負責處理登入邏輯，現在的流程：
+    1. 如果 email / password 為空，先填入測試用的預設值
+    2. 呼叫 authManager.login(email:password:)
+    3. 在 AuthManager 裡面把 isLoggedIn 設為 true
+  → 因為 ContentView 觀察了 AuthManager：
+       if authManager.isLoggedIn { HomeView() } else { LoginView() }
+    所以當 isLoggedIn 變成 true 時，畫面會自動從 LoginView 換成 HomeView
+
+註冊按鈕（「立即註冊」）
+  → 點擊後把 showingRegister 設為 true
+  → .sheet(isPresented: $showingRegister) { RegisterView() } 會顯示註冊畫面
+
+================================================================================
+【RegisterView.swift（註冊頁面）與 HomeView.swift（主頁面）概要】
+================================================================================
+
+【RegisterView.swift：建立帳號並登入】
+--------------------------------------
+主要狀態：
+  - name / email / password / confirmPassword：使用者輸入
+  - isPasswordVisible / isConfirmPasswordVisible：控制密碼顯示/隱藏
+  - errorMessage：顯示表單驗證錯誤
+
+認證邏輯：
+  - @ObservedObject var authManager = AuthManager.shared
+  - handleRegister():
+      1. 檢查欄位是否全部填寫
+      2. 檢查密碼長度 >= 6
+      3. 確認密碼與確認欄一致
+      4. 檢查 email 是否包含 @ 和 .
+      5. 呼叫 authManager.register(name: email: password:)
+      6. dismiss() 關閉註冊畫面
+  - AuthManager.register(...) 內部會把 isLoggedIn 設為 true，
+    所以回到 ContentView 時會直接看到 HomeView（主畫面）
+
+【HomeView.swift：主畫面與登出】
+--------------------------------
+狀態：
+  - meals: [Meal]         → 今日餐點列表（使用 struct Meal: Identifiable）
+  - goal: Goal            → 目標卡路里與營養素
+  - showingAddMeal        → 是否顯示「新增餐點」視窗
+  - showingGoalSettings   → 是否顯示「目標設定」視窗
+  - @ObservedObject var authManager = AuthManager.shared → 用來處理登出
+
+主要功能：
+  - 顯示「今日卡路里 / 目標卡路里」與進度條、圓環
+  - 使用 ScrollView 顯示今日餐點列表（或者顯示「還沒有記錄任何餐點」的空狀態）
+  - 右上角工具列的「人頭 icon」按鈕呼叫 authManager.logout()
+    → 把 isLoggedIn 設為 false
+    → ContentView 偵測到變化之後，自動切回 LoginView（登入畫面）
+
+彈出視圖：
+  - .sheet(isPresented: $showingAddMeal) { AddMealView(meals: $meals) }
+    → 使用 @Binding 把 meals 傳入子視圖，子視圖儲存後直接改到父層陣列
+  - .sheet(isPresented: $showingGoalSettings) { GoalSettingsView(goal: $goal) }
+
+================================================================================
+【ContentView.swift 與 AuthManager.swift 的關係】
+================================================================================
+
+ContentView.swift
+------------------
+  struct ContentView: View {
+      @ObservedObject var authManager = AuthManager.shared
+
+      var body: some View {
+          if authManager.isLoggedIn {
+              HomeView()   // 已登入 → 主畫面
+          } else {
+              LoginView()  // 未登入 → 登入畫面
+          }
+      }
+  }
+
+AuthManager.swift
+-----------------
+  - import Combine  // 很重要：@Published 和 ObservableObject 需要這個
+  - class AuthManager: ObservableObject {
+        static let shared = AuthManager()
+        @Published var isLoggedIn: Bool = false
+        @Published var currentUser: String = ""
+    }
+  - login(...) / register(...) 把 isLoggedIn 設為 true
+  - logout() 把 isLoggedIn 設為 false
+
+這樣就形成「全域認證狀態」：
+  - LoginView / RegisterView / HomeView 都拿同一個 AuthManager.shared
+  - ContentView 根據 isLoggedIn 自動切換畫面
+
+================================================================================
+【SwiftUI 與其他語言的對照】
+================================================================================
+
+【與 Python 的對照】
+-------------------
+@State 變數
+  → Python: 類別屬性（但 SwiftUI 會自動處理更新）
+  
+函數定義
+  → Swift: func functionName() { }
+  → Python: def function_name():
+  
+字串插值
+  → Swift: "電子郵件: \(email)"
+  → Python: f"電子郵件: {email}"
+
+【與 C 的對照】
+--------------
+變數型別宣告
+  → Swift: var email: String = ""
+  → C: char email[100] = "";
+  
+布林值
+  → Swift: Bool (true/false)
+  → C: bool (true/false，需要 #include <stdbool.h>)
+  
+結構體
+  → Swift: struct CustomTextFieldStyle { }
+  → C: struct CustomTextFieldStyle { };
+
+【與 HTML/CSS 的對照】
+---------------------
+視圖結構
+  → SwiftUI: VStack { Text("Hello") }
+  → HTML: <div><p>Hello</p></div>
+  
+樣式修飾
+  → SwiftUI: .padding().background(Color.blue)
+  → CSS: padding: 10px; background-color: blue;
+  
+條件渲染
+  → SwiftUI: if condition { View() }
+  → HTML/JS: {condition && <div></div>}
+
+================================================================================
+【常用 SwiftUI 修飾符速查表】
+================================================================================
+
+【間距和尺寸】
+--------------
+.padding()              → 所有方向內邊距
+.padding(15)            → 所有方向 15 點
+.padding(.horizontal, 30) → 左右各 30 點
+.padding(.vertical, 20)   → 上下各 20 點
+.padding(.top, 10)        → 上方 10 點
+
+.frame(width: 200, height: 50)  → 固定寬高
+.frame(maxWidth: .infinity)      → 寬度填滿
+.frame(height: 50)               → 固定高度
+
+【顏色和背景】
+--------------
+.foregroundColor(.white)         → 文字顏色
+.background(Color.blue)          → 背景顏色
+.background(Color.white.opacity(0.5)) → 半透明背景
+
+【字體】
+--------
+.font(.system(size: 18))                    → 系統字體，大小 18
+.font(.system(size: 18, weight: .bold))    → 粗體
+.font(.system(size: 18, weight: .semibold)) → 半粗體
+.font(.title)                               → 標題字體
+.font(.headline)                            → 標題字體
+
+【圓角和邊框】
+--------------
+.cornerRadius(12)                          → 圓角 12 點
+RoundedRectangle(cornerRadius: 12)         → 圓角矩形
+.overlay(RoundedRectangle(...).stroke(...)) → 邊框
+
+【對齊】
+--------
+VStack(alignment: .leading)  → 左對齊
+VStack(alignment: .center)   → 置中對齊
+VStack(alignment: .trailing) → 右對齊
+
+【間距】
+--------
+VStack(spacing: 20)  → 子元素間距 20 點
+HStack(spacing: 10)  → 子元素間距 10 點
+
+================================================================================
+【下一步學習建議】
+================================================================================
+
+1. 【修改現有程式碼】
+   - 嘗試改變顏色（.foregroundColor(.red)）
+   - 調整間距（spacing 和 padding）
+   - 修改字體大小
+
+2. 【學習導航】
+   - NavigationView 和 NavigationLink（類似 <a> 標籤）
+   - 頁面之間的跳轉
+
+3. 【學習資料模型】
+   - 建立 User 結構體來儲存用戶資料
+   - 使用 ObservableObject + @ObservedObject + @Published 管理全域狀態（已在 AuthManager 實作一個範例）
+
+4. 【學習表單驗證】
+   - 實作更完整的輸入驗證
+   - 顯示錯誤訊息
+
+5. 【學習 API 整合】
+   - 使用 URLSession 連接後端
+   - 處理非同步請求
+
+================================================================================
+【常見問題解答】
+================================================================================
+
+Q: 為什麼要用 @State？
+A: @State 讓 SwiftUI 知道當這個變數改變時，需要重新渲染視圖。
+   如果不用 @State，修改變數不會更新畫面。
+
+Q: $email 和 email 有什麼差別？
+A: $email 是綁定（binding），用於雙向資料流（如 TextField）。
+   email 是讀取值，用於顯示（如 Text）。
+
+Q: 如何讓按鈕點擊後跳轉到其他頁面？
+A: 使用 NavigationView 和 NavigationLink：
+   NavigationLink("前往下一頁", destination: NextView())
+
+Q: 如何顯示錯誤訊息？
+A: 可以使用 @State 變數儲存錯誤訊息，然後用條件渲染顯示：
+   if !errorMessage.isEmpty {
+     Text(errorMessage).foregroundColor(.red)
+   }
+
+Q: SwiftUI 的預覽功能怎麼用？
+A: 在 Xcode 中，點擊右上角的「Resume」按鈕，或使用快捷鍵 Option+Cmd+P
+   就可以看到即時預覽，修改程式碼時會自動更新。
+
+================================================================================
+【參考資源】
+================================================================================
+
+- Apple 官方 SwiftUI 文件：
+  https://developer.apple.com/xcode/swiftui/
+
+- SwiftUI 教學影片（Apple）：
+  https://developer.apple.com/videos/frameworks/swiftui
+
+- SF Symbols 圖標庫：
+  https://developer.apple.com/sf-symbols/
+
+================================================================================
+文件建立日期：2025/11/19
+================================================================================
+
