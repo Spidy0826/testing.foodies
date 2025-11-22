@@ -9,11 +9,22 @@ import SwiftUI
 
 // 餐點資料模型
 struct Meal: Identifiable {
-    let id = UUID()
+    let id: UUID
     let name: String
     let time: String
     let calories: Int
-    let imageName: String // 暫時使用 SF Symbols，之後可以替換為實際圖片
+    let imageName: String // SF Symbols 圖標名稱
+    let image: UIImage? // 實際拍攝的圖片（可選）
+    
+    // 便利初始化器（向後兼容）
+    init(id: UUID = UUID(), name: String, time: String, calories: Int, imageName: String, image: UIImage? = nil) {
+        self.id = id
+        self.name = name
+        self.time = time
+        self.calories = calories
+        self.imageName = imageName
+        self.image = image
+    }
 }
 
 // 目標設定模型
@@ -29,6 +40,13 @@ struct HomeView: View {
     @State private var goal: Goal = Goal()
     @State private var showingAddMeal = false
     @State private var showingGoalSettings = false
+    @State private var showingCamera = false
+    @State private var capturedImage: UIImage?
+    @State private var showingAnalysis = false
+    @State private var currentAnalysis: MealAnalysis?
+    @State private var selectedMealTime = "早餐"
+    @State private var isAnalyzing = false
+    @State private var showingMealTimePicker = false
     
     // 使用 AuthManager 來處理登出
     @ObservedObject var authManager = AuthManager.shared
@@ -137,11 +155,12 @@ struct HomeView: View {
                         // 快速操作按鈕
                         HStack(spacing: 15) {
                             Button(action: {
-                                showingAddMeal = true
+                                // 打開相機拍照
+                                showingCamera = true
                             }) {
                                 HStack {
-                                    Image(systemName: "plus.circle.fill")
-                                    Text("記錄餐點")
+                                    Image(systemName: "camera.fill")
+                                    Text("拍攝餐點")
                                 }
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(.white)
@@ -155,6 +174,18 @@ struct HomeView: View {
                                     )
                                 )
                                 .cornerRadius(12)
+                            }
+                            
+                            // 手動輸入按鈕（保留舊功能）
+                            Button(action: {
+                                showingAddMeal = true
+                            }) {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.blue)
+                                    .frame(width: 50, height: 50)
+                                    .background(Color.blue.opacity(0.1))
+                                    .cornerRadius(12)
                             }
                             
                             Button(action: {
@@ -227,11 +258,108 @@ struct HomeView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showingCamera) {
+                CameraView(capturedImage: $capturedImage)
+            }
+            .sheet(isPresented: $showingAnalysis) {
+                if let analysis = currentAnalysis {
+                    MealAnalysisView(
+                        meals: $meals,
+                        goal: $goal,
+                        analysis: analysis,
+                        mealImage: capturedImage,
+                        mealTime: selectedMealTime
+                    )
+                }
+            }
             .sheet(isPresented: $showingAddMeal) {
                 AddMealView(meals: $meals)
             }
             .sheet(isPresented: $showingGoalSettings) {
                 GoalSettingsView(goal: $goal)
+            }
+            .onChange(of: capturedImage) { newImage in
+                // 當圖片被拍攝後，先選擇用餐時間
+                if newImage != nil {
+                    showingMealTimePicker = true
+                }
+            }
+            .actionSheet(isPresented: $showingMealTimePicker) {
+                ActionSheet(
+                    title: Text("選擇用餐時間"),
+                    buttons: [
+                        .default(Text("早餐")) {
+                            selectedMealTime = "早餐"
+                            if let image = capturedImage {
+                                analyzeImage(image: image)
+                            }
+                        },
+                        .default(Text("午餐")) {
+                            selectedMealTime = "午餐"
+                            if let image = capturedImage {
+                                analyzeImage(image: image)
+                            }
+                        },
+                        .default(Text("晚餐")) {
+                            selectedMealTime = "晚餐"
+                            if let image = capturedImage {
+                                analyzeImage(image: image)
+                            }
+                        },
+                        .default(Text("點心")) {
+                            selectedMealTime = "點心"
+                            if let image = capturedImage {
+                                analyzeImage(image: image)
+                            }
+                        },
+                        .cancel(Text("取消")) {
+                            capturedImage = nil
+                        }
+                    ]
+                )
+            }
+            .overlay {
+                // 分析中的載入畫面
+                if isAnalyzing {
+                    ZStack {
+                        Color.black.opacity(0.5)
+                            .ignoresSafeArea()
+                        
+                        VStack(spacing: 20) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                                .tint(.white)
+                            
+                            Text("AI 正在分析你的餐點...")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                        .padding(30)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(Color(.systemBackground))
+                        )
+                    }
+                }
+            }
+        }
+    }
+    
+    // AI 分析圖片
+    private func analyzeImage(image: UIImage) {
+        isAnalyzing = true
+        
+        Task {
+            let analysis = await AIAnalysisService.shared.analyzeMeal(
+                image: image,
+                goal: goal,
+                mealTime: selectedMealTime
+            )
+            
+            await MainActor.run {
+                currentAnalysis = analysis
+                isAnalyzing = false
+                showingAnalysis = true
             }
         }
     }
@@ -243,21 +371,32 @@ struct MealRow: View {
     
     var body: some View {
         HStack(spacing: 15) {
-            // 圖標
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.3)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+            // 圖片或圖標
+            if let image = meal.image {
+                // 顯示實際拍攝的圖片
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
                     .frame(width: 60, height: 60)
-                
-                Image(systemName: meal.imageName)
-                    .font(.system(size: 24))
-                    .foregroundColor(.blue)
+                    .clipped()
+                    .cornerRadius(12)
+            } else {
+                // 顯示 SF Symbols 圖標
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.3)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 60, height: 60)
+                    
+                    Image(systemName: meal.imageName)
+                        .font(.system(size: 24))
+                        .foregroundColor(.blue)
+                }
             }
             
             // 餐點資訊
