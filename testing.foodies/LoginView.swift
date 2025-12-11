@@ -150,7 +150,7 @@ struct LoginView: View {
         // 簡單的驗證（為了方便測試，暫時允許空值登入）
         // 實際應用中應該有完整的驗證邏輯
         if email.isEmpty {
-            email = "test@example.com" // 如果為空，使用預設值方便測試
+            email = "test@example.com" //aa 如果為空，使用預設值方便測試
         }
         if password.isEmpty {
             password = "test123" // 如果為空，使用預設值方便測試

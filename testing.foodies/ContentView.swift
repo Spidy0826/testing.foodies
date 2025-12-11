@@ -15,10 +15,8 @@ struct ContentView: View {
     var body: some View {
         // 根據登入狀態顯示不同的視圖
         if authManager.isLoggedIn {
-            // 已登入：顯示主頁面
-            HomeView()
+            MainTabView()
         } else {
-            // 未登入：顯示登入頁面
             LoginView()
         }
     }

@@ -5,11 +5,17 @@ Foodie's App - LoginView 實作說明
 
 【檔案結構說明】
 -----------------
-1. LoginView.swift   - 登入頁面（使用 AuthManager.shared 控制登入狀態）
-2. RegisterView.swift - 註冊頁面（建立新帳號，成功後透過 AuthManager 自動登入）
-3. HomeView.swift    - 主頁面（顯示卡路里進度與餐點列表，可登出）
-4. AuthManager.swift - 全域認證管理（ObservableObject，管理 isLoggedIn 狀態）
-5. ContentView.swift - 根視圖，根據 AuthManager.isLoggedIn 在 LoginView / HomeView 之間切換
+1. LoginView.swift    - 登入頁面（使用 AuthManager.shared 控制登入狀態）
+2. RegisterView.swift  - 註冊頁面（建立新帳號，成功後透過 AuthManager 自動登入）
+3. HomeView.swift     - 主頁面（顯示卡路里進度與餐點列表，可登出）
+4. AuthManager.swift  - 全域認證管理（ObservableObject，管理 isLoggedIn 狀態）
+5. ContentView.swift  - 根視圖，根據 AuthManager.isLoggedIn 在 LoginView 與主要選單之間切換
+6. MainTabView.swift  - 下方選單列（TabView）整合 Home / Analysis / Group / Personal / Shopping 五個功能入口
+7. AnalysisView.swift - 分析占位頁面（未來放入完整 AI 分析報告）
+8. GroupView.swift    - 社群/朋友占位頁面
+9. PersonalView.swift - 個人頁面占位（設定、統計）
+10. ShoppingView.swift- 購物占位頁面
+11. EmptyStateView.swift - 共用空狀態元件，用來快速建立占位頁
 
 ================================================================================
 【SwiftUI 基礎概念對照表】
@@ -308,11 +314,46 @@ handleLogin()
     → ContentView 偵測到變化之後，自動切回 LoginView（登入畫面）
 
 彈出視圖：
+  - .sheet(isPresented: $showingCamera) 顯示 CameraView（拍攝餐點）
+  - .sheet(isPresented: $showingAnalysis) 顯示 MealAnalysisView（AI 分析結果）
   - .sheet(isPresented: $showingAddMeal) { AddMealView(meals: $meals) }
     → 使用 @Binding 把 meals 傳入子視圖，子視圖儲存後直接改到父層陣列
   - .sheet(isPresented: $showingGoalSettings) { GoalSettingsView(goal: $goal) }
 
+AI 分析流程：
+  1. 點擊「拍攝餐點」→ CameraView 取得圖片
+  2. 透過 actionSheet 選擇用餐時間（早餐/午餐/晚餐/點心）
+  3. 呼叫 AIAnalysisService.analyzeMeal(...)（目前以模擬資料回傳評分、理由與建議）
+  4. 顯示 MealAnalysisView，使用者可閱讀結果並儲存這餐
+  5. Meal 模型現在包含 `image: UIImage?`，列表會顯示實際照片
+
 ================================================================================
+【MainTabView.swift：下方選單列】
+--------------------------------
+TabView 的用法（類似 iOS App 常見的底部 Tab bar）：
+  struct MainTabView: View {
+      @State private var selection = 0
+      var body: some View {
+          TabView(selection: $selection) {
+              HomeView()
+                  .tabItem { Label("Home", systemName: "house.fill") }
+                  .tag(0)
+              AnalysisView()
+                  .tabItem { ... }
+              ...
+          }
+      }
+  }
+
+優點：
+  - SwiftUI 內建 TabView = 自動建立底部選單（無需額外套件）
+  - 每個 tab 都是一個獨立的 View，所以可以把不同模組拆開開發
+  - selection 綁定可讀寫，之後可根據事件切換 tab
+
+占位頁面：
+  - AnalysisView / GroupView / PersonalView / ShoppingView 都使用 EmptyStateView
+  - EmptyStateView 提供標題、描述、圖示，讓 UI 一致且易於維護
+
 【ContentView.swift 與 AuthManager.swift 的關係】
 ================================================================================
 
@@ -323,9 +364,9 @@ ContentView.swift
 
       var body: some View {
           if authManager.isLoggedIn {
-              HomeView()   // 已登入 → 主畫面
+              MainTabView()   // 已登入 → 底部選單（包含 Home/Analysis/...）
           } else {
-              LoginView()  // 未登入 → 登入畫面
+              LoginView()     // 未登入 → 登入畫面
           }
       }
   }
